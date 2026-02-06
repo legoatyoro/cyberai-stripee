@@ -1,7 +1,10 @@
 import Stripe from "stripe";
 import { NextResponse } from "next/server";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+function getStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) throw new Error("STRIPE_SECRET_KEY not set");
+  return new Stripe(process.env.STRIPE_SECRET_KEY);
+}
 
 const PRODUCTS = {
   sqli: { name: "CyberAI Fix  SQL Injection", description: "Correction complete : requetes parametrees, ORM, validation.", price: 14900, severity: "critical" },
@@ -16,7 +19,7 @@ const PRODUCTS = {
   info_leak: { name: "CyberAI Fix  Information Leak", description: "Correction complete : erreurs generiques, suppression headers.", price: 1900, severity: "low" },
 };
 
-async function getOrCreateCoupon(percent) {
+async function getOrCreateCoupon(stripe, percent) {
   const couponId = "BUNDLE_" + percent;
   try { return (await stripe.coupons.retrieve(couponId)).id; }
   catch { return (await stripe.coupons.create({ id: couponId, percent_off: percent, duration: "once", name: "Pack CyberAI -" + percent + "%" })).id; }
@@ -24,6 +27,7 @@ async function getOrCreateCoupon(percent) {
 
 export async function POST(request) {
   try {
+    const stripe = getStripe();
     const body = await request.json();
     const { vulnType, sessionId, target, types } = body;
 
@@ -38,11 +42,11 @@ export async function POST(request) {
         payment_method_types: ["card"],
         line_items: lineItems,
         mode: "payment",
-        success_url: process.env.NEXT_PUBLIC_BASE_URL + "/checkout/success?session_id={CHECKOUT_SESSION_ID}",
-        cancel_url: process.env.NEXT_PUBLIC_BASE_URL + "/checkout/cancel",
+        success_url: (process.env.NEXT_PUBLIC_BASE_URL || "") + "/checkout/success?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url: (process.env.NEXT_PUBLIC_BASE_URL || "") + "/checkout/cancel",
         metadata: { pentest_session: sessionId || "", target: target || "", vuln_types: types.join(","), bundle: "true" },
       };
-      if (discount > 0) sessionOpts.discounts = [{ coupon: await getOrCreateCoupon(discount) }];
+      if (discount > 0) sessionOpts.discounts = [{ coupon: await getOrCreateCoupon(stripe, discount) }];
       const session = await stripe.checkout.sessions.create(sessionOpts);
       return NextResponse.json({ url: session.url, sessionId: session.id });
     }
@@ -54,8 +58,8 @@ export async function POST(request) {
       payment_method_types: ["card"],
       line_items: [{ price_data: { currency: "eur", product_data: { name: product.name, description: product.description }, unit_amount: product.price }, quantity: 1 }],
       mode: "payment",
-      success_url: process.env.NEXT_PUBLIC_BASE_URL + "/checkout/success?session_id={CHECKOUT_SESSION_ID}",
-      cancel_url: process.env.NEXT_PUBLIC_BASE_URL + "/checkout/cancel",
+      success_url: (process.env.NEXT_PUBLIC_BASE_URL || "") + "/checkout/success?session_id={CHECKOUT_SESSION_ID}",
+      cancel_url: (process.env.NEXT_PUBLIC_BASE_URL || "") + "/checkout/cancel",
       metadata: { pentest_session: sessionId || "", target: target || "", vuln_type: vulnType },
     });
     return NextResponse.json({ url: session.url, sessionId: session.id });
